@@ -479,10 +479,10 @@ void BTHome::build_advertisement_data_() {
   // Increment packet_id for next data change (wraps at 255)
   this->packet_id_++;
 
-  ESP_LOGD(TAG, "Built advertisement data (%zu bytes, packet_id=%u)", this->adv_data_len_, (uint8_t)(this->packet_id_ - 1));
+  ESP_LOGD(TAG, "Built advertisement data (%u bytes, packet_id=%u)", this->adv_data_len_, (uint8_t)(this->packet_id_ - 1));
 #ifdef USE_SENSOR
   if (this->measurements_.size() > 1) {
-    ESP_LOGD(TAG, "  Sensor rotation index: %zu/%zu", this->current_sensor_index_, this->measurements_.size());
+    ESP_LOGD(TAG, "  Sensor rotation index: %u/%u", this->current_sensor_index_, this->measurements_.size());
   }
 #endif
 }
@@ -533,7 +533,7 @@ void BTHome::build_scan_response_data_() {
   }
 
   this->scan_rsp_data_len_ = pos;
-  ESP_LOGD(TAG, "Built scan response data (%zu bytes)", this->scan_rsp_data_len_);
+  ESP_LOGD(TAG, "Built scan response data (%u bytes)", this->scan_rsp_data_len_);
 }
 
 void BTHome::start_advertising_() {
@@ -626,17 +626,19 @@ void BTHome::start_advertising_() {
 
   // Service data (skip flags we already added)
   this->ad_[1].type = BT_DATA_SVC_DATA16;
-  this->ad_[1].data_len = this->adv_data_len_ - 3;  // Skip flags
-  this->ad_[1].data = this->adv_data_ + 4;          // Skip flags + length + type
+  this->ad_[1].data_len = this->adv_data_len_ - 5;  // Skip flags
+  this->ad_[1].data = this->adv_data_ + 5;          // Skip flags + length + type
 
   // Set up scan response data
   size_t sd_count = 0;
+  size_t byte_count = 0;
 
   // Add BTHome service UUID to scan response
   static uint8_t svc_uuid_data[] = {BTHOME_SERVICE_UUID & 0xFF, (BTHOME_SERVICE_UUID >> 8) & 0xFF};
   this->sd_[sd_count].type = BT_DATA_UUID16_ALL;
   this->sd_[sd_count].data_len = sizeof(svc_uuid_data);
   this->sd_[sd_count].data = svc_uuid_data;
+  byte_count += this->sd_[sd_count].data_len + 2;
   sd_count++;
 
   // Add TX Power Level
@@ -645,6 +647,7 @@ void BTHome::start_advertising_() {
   this->sd_[sd_count].type = BT_DATA_TX_POWER;
   this->sd_[sd_count].data_len = sizeof(tx_power_data);
   this->sd_[sd_count].data = reinterpret_cast<const uint8_t *>(&tx_power_data);
+  byte_count += this->sd_[sd_count].data_len + 2;
   sd_count++;
 
   // Add Appearance (Generic Sensor = 0x0540)
@@ -652,18 +655,20 @@ void BTHome::start_advertising_() {
   this->sd_[sd_count].type = BT_DATA_GAP_APPEARANCE;
   this->sd_[sd_count].data_len = sizeof(appearance_data);
   this->sd_[sd_count].data = appearance_data;
+  byte_count += this->sd_[sd_count].data_len + 2;
   sd_count++;
 
   if (!this->device_name_.empty()) {
     this->sd_[sd_count].type = BT_DATA_NAME_COMPLETE;
     this->sd_[sd_count].data_len = this->device_name_.length();
     this->sd_[sd_count].data = reinterpret_cast<const uint8_t *>(this->device_name_.c_str());
+    byte_count += this->sd_[sd_count].data_len + 2;
     sd_count++;
   }
 
+  // Manufacturer ID (2 bytes) + ESPHome version code (4 bytes)
+  static uint8_t mfr_data[6];
   if (this->has_manufacturer_id_) {
-    // Manufacturer ID (2 bytes) + ESPHome version code (4 bytes)
-    static uint8_t mfr_data[6];
     mfr_data[0] = this->manufacturer_id_ & 0xFF;
     mfr_data[1] = (this->manufacturer_id_ >> 8) & 0xFF;
     uint32_t version = ESPHOME_VERSION_CODE;
@@ -674,18 +679,21 @@ void BTHome::start_advertising_() {
     this->sd_[sd_count].type = BT_DATA_MANUFACTURER_DATA;
     this->sd_[sd_count].data_len = sizeof(mfr_data);
     this->sd_[sd_count].data = mfr_data;
+    byte_count += this->sd_[sd_count].data_len + 2;
     sd_count++;
   }
 
   int err = bt_le_adv_start(&this->adv_param_, this->ad_, 2,
                             sd_count > 0 ? this->sd_ : nullptr, sd_count);
   if (err) {
-    ESP_LOGE(TAG, "Advertising failed to start (err %d)", err);
+    ESP_LOGE(TAG,
+      "Advertising failed to start (err %d, sd_count %u, byte_count %u)",
+      err, sd_count, byte_count);
     return;
   }
 
   this->advertising_ = true;
-  ESP_LOGD(TAG, "BTHome advertising started");
+  ESP_LOGD(TAG, "BTHome advertising started, byte_count %u", byte_count);
 #endif
 }
 
