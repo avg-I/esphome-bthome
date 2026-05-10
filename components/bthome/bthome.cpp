@@ -159,7 +159,7 @@ void BTHome::setup() {
 #ifdef USE_NRF52
   // nRF52: Initialize Bluetooth
   int err = bt_enable(nullptr);
-  if (err) {
+  if (err != 0 && err != -EALREADY) {
     ESP_LOGE(TAG, "Bluetooth init failed (err %d)", err);
     this->mark_failed();
     return;
